@@ -1,3 +1,5 @@
+#Requires AutoHotkey v2.0
+
 DotNet_LoadLibrary(AssemblyName) {
     return DotNet.LoadAssembly(AssemblyName)
 }
