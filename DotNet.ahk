@@ -45,7 +45,6 @@ class DotNet {
         ; https://github.com/dotnet/runtime/blob/main/src/coreclr/hosts/inc/coreclrhost.h
         DllCall("coreclr\coreclr_initialize", "Ptr", UTF8(exeDir), "AStr", "AutoHotkeyHost", "Int", 1, "Ptr", propertyKeys, "Ptr", propertyValues, "Ptr*", &hostHandle:=0, "Uint*", &domainId:=0)
         DllCall("coreclr\coreclr_create_delegate", "Ptr", hostHandle, "Uint", domainId, "AStr", "System.Private.CoreLib", "AStr", "Internal.Runtime.InteropServices.ComponentActivator", "AStr", "LoadAssemblyBytes", "Ptr*", &load_assembly_bytes:=0)
-        DllCall("coreclr\coreclr_create_delegate", "Ptr", hostHandle, "Uint", domainId, "AStr", "System.Private.CoreLib", "AStr", "Internal.Runtime.InteropServices.ComponentActivator", "AStr", "GetFunctionPointer", "Ptr*", &get_function_pointer:=0)
         ; https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/Internal/Runtime/InteropServices/ComponentActivator.cs
         ; https://github.com/dotnet/runtime/blob/main/src/native/corehost/coreclr_delegates.h
         load_assembly(NETCore_path "\System.Runtime.dll")
