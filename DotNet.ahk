@@ -26,12 +26,26 @@ class DotNet {
         InsertionSort(toSort, semver_cmp)
         latest_version := toSort[toSort.Length]
         NETCore_path := "C:\Program Files\dotnet\shared\Microsoft.NETCore.App\" latest_version.0
+        WindowsDesktop_path := "C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App\" latest_version.0
+        AspNetCore_path := "C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App\" latest_version.0
         coreclr_fullpath := NETCore_path "\coreclr.dll"
         coreclr_hModule := DllCall("LoadLibraryW", "WStr", coreclr_fullpath, "Ptr")
         SplitPath A_AhkPath,, &exeDir
         TRUSTED_PLATFORM_ASSEMBLIES := ""
         Loop Files NETCore_path "\*.dll", "F" {
-            if (A_Index > 1) {
+            if (TRUSTED_PLATFORM_ASSEMBLIES) {
+                TRUSTED_PLATFORM_ASSEMBLIES .= ";"
+            }
+            TRUSTED_PLATFORM_ASSEMBLIES .= A_LoopFileFullPath
+        }
+        Loop Files WindowsDesktop_path "\*.dll", "F" {
+            if (TRUSTED_PLATFORM_ASSEMBLIES) {
+                TRUSTED_PLATFORM_ASSEMBLIES .= ";"
+            }
+            TRUSTED_PLATFORM_ASSEMBLIES .= A_LoopFileFullPath
+        }
+        Loop Files AspNetCore_path "\*.dll", "F" {
+            if (TRUSTED_PLATFORM_ASSEMBLIES) {
                 TRUSTED_PLATFORM_ASSEMBLIES .= ";"
             }
             TRUSTED_PLATFORM_ASSEMBLIES .= A_LoopFileFullPath
