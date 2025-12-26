@@ -19,26 +19,42 @@ namespace AHK_DotNet_Interop
 
         public static int GetClass(string FullName, IntPtr out_IDispatch)
         {
-            Type? found_type = AppDomain.CurrentDomain.GetAssemblies().SelectMany(x => x.GetTypes()).FirstOrDefault(t => t.FullName == FullName);
-            if (found_type == null)
+            try
             {
-                return 1;
+                Type? found_type = AppDomain.CurrentDomain.GetAssemblies().SelectMany(x => x.GetTypes()).FirstOrDefault(t => t.FullName == FullName);
+                if (found_type == null)
+                {
+                    return 1;
+                }
+                if (out_IDispatch != 0)
+                {
+                    Marshal.WriteIntPtr(out_IDispatch, Marshal.GetComInterfaceForObject(new Wrapper(found_type), typeof(IDispatch)));
+                }
+                return 0;
             }
-            if (out_IDispatch != 0)
+            catch (Exception e)
             {
-                Marshal.WriteIntPtr(out_IDispatch, Marshal.GetComInterfaceForObject(new Wrapper(found_type), typeof(IDispatch)));
+                Console.WriteLine(e);
+                throw;
             }
-            return 0;
         }
 
         public static int LoadAssembly([MarshalAs(UnmanagedType.LPWStr)] string path, IntPtr out_IDispatch)
         {
-            Assembly assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(path);
-            if (out_IDispatch != 0)
+            try
             {
-                Marshal.WriteIntPtr(out_IDispatch, Marshal.GetComInterfaceForObject(new Wrapper(assembly), typeof(IDispatch)));
+                Assembly assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(path);
+                if (out_IDispatch != 0)
+                {
+                    Marshal.WriteIntPtr(out_IDispatch, Marshal.GetComInterfaceForObject(new Wrapper(assembly), typeof(IDispatch)));
+                }
+                return 0;
             }
-            return 0;
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                throw;
+            }
         }
 
         static ArrayList _list = ["1", "2", "3"];
@@ -133,7 +149,7 @@ namespace AHK_DotNet_Interop
         }
 
         public Wrapper(object obj) : this(obj, obj.GetType()) { }
-        public Wrapper(Type type) : this(null, type) { }
+        public Wrapper(Type type) : this(type, type) { }
 
         public Wrapper(object? obj, Type type)
         {
@@ -170,6 +186,9 @@ namespace AHK_DotNet_Interop
                     }
                 }
                 int idx_counter = 1;
+                // Console.WriteLine("++++++++++++++++++++");
+                // Console.WriteLine(_type.ToString());
+                // foreach (var method in type.GetMethods(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static))
                 foreach (var method in type.GetMethods())
                 {
                     // if (method.IsStatic)
@@ -255,7 +274,7 @@ namespace AHK_DotNet_Interop
                 switch (obj)
                 {
                     case Wrapper wrapper:
-                        arr[i] = wrapper._obj ?? wrapper._type;
+                        arr[i] = wrapper._obj;
                         break;
                     default:
                         arr[i] = obj;
@@ -330,149 +349,157 @@ namespace AHK_DotNet_Interop
 
         public uint Invoke(int dispIdMember, ref Guid riid, int lcid, InvokeFlags wFlags, DISPPARAMS pDispParams, nint VarResult, nint pExcepInfo, nint puArgErr)
         {
-            // Console.WriteLine($"dispId: {dispIdMember}");
-            List<MethodInfo>? methods;
-            if (dispIdMember < 0)
+            try
             {
-                if (dispIdMember == DISPID_NEWENUM
-                    // && pDispParams.cArgs == 1
-                    // && Marshal.ReadInt16(pDispParams.rgvarg) == (short)(VarEnum.VT_BYREF | VarEnum.VT_VARIANT) // AHK specific
-                    && _obj is IEnumerable enumerable)
+                // Console.WriteLine($"dispId: {dispIdMember}");
+                List<MethodInfo>? methods;
+                if (dispIdMember < 0)
                 {
-                    // var ptr_dest = Marshal.ReadIntPtr(pDispParams.rgvarg + 8);
-                    var ptr = Marshal.GetComInterfaceForObject(new Enumerator(enumerable.GetEnumerator()), typeof(IEnumVARIANT));
-                    // Marshal.WriteInt16(ptr_dest, (short)VarEnum.VT_UNKNOWN);
-                    // Marshal.WriteIntPtr(ptr_dest + 8, ptr);
-                    Marshal.WriteInt16(VarResult, (short)VarEnum.VT_UNKNOWN);
-                    Marshal.WriteIntPtr(VarResult + 8, ptr);
-                    return 0;
-                }
-                return DISP_E_MEMBERNOTFOUND;
-            }
-            if (dispIdMember >= _methods_list.Count || ((methods = _methods_list[dispIdMember]) == null)) // get_Item/set_Item(always dispId=0) could be null
-            {
-                return DISP_E_MEMBERNOTFOUND;
-            }
-            // foreach (var method in methods)
-            // {
-            //     var parameters = method.GetParameters();
-            //     var parameterDescriptions = string.Join
-            //         (", ", method.GetParameters()
-            //                     .Select(x => x.ParameterType + " " + x.Name)
-            //                     .ToArray());
-            //     Console.WriteLine("{0} {1} ({2}) {3}",
-            //                     method.ReturnType,
-            //                     method.Name,
-            //                     parameterDescriptions,
-            //                     method.IsSpecialName ? "special" : "");
-            // }
-
-            // Console.WriteLine($"wFlags:{wFlags}");
-            object? res = null;
-            MethodInfo? found_method = null;
-            object?[]? args = null;
-            switch (wFlags)
-            {
-                case InvokeFlags.DISPATCH_PROPERTYGET:
-                    found_method = methods.Find(v => v.Name.StartsWith("get_"));
-                    break;
-                case InvokeFlags.DISPATCH_PROPERTYPUT:
-                    found_method = methods.Find(v => v.Name.StartsWith("set_"));
-                    break;
-                case InvokeFlags.DISPATCH_METHOD:
-                    args = DISPPARAMS_to_objectArray(pDispParams);
-                    List<Conversion> conversions = [];
-                    found_method = methods.Find(v =>
+                    if (dispIdMember == DISPID_NEWENUM
+                        // && pDispParams.cArgs == 1
+                        // && Marshal.ReadInt16(pDispParams.rgvarg) == (short)(VarEnum.VT_BYREF | VarEnum.VT_VARIANT) // AHK specific
+                        && _obj is IEnumerable enumerable)
                     {
-                        ParameterInfo[] parameters = v.GetParameters();
-                        if (parameters.Length != pDispParams.cArgs)
+                        // var ptr_dest = Marshal.ReadIntPtr(pDispParams.rgvarg + 8);
+                        var ptr = Marshal.GetComInterfaceForObject(new Enumerator(enumerable.GetEnumerator()), typeof(IEnumVARIANT));
+                        // Marshal.WriteInt16(ptr_dest, (short)VarEnum.VT_UNKNOWN);
+                        // Marshal.WriteIntPtr(ptr_dest + 8, ptr);
+                        Marshal.WriteInt16(VarResult, (short)VarEnum.VT_UNKNOWN);
+                        Marshal.WriteIntPtr(VarResult + 8, ptr);
+                        return 0;
+                    }
+                    return DISP_E_MEMBERNOTFOUND;
+                }
+                if (dispIdMember >= _methods_list.Count || ((methods = _methods_list[dispIdMember]) == null)) // get_Item/set_Item(always dispId=0) could be null
+                {
+                    return DISP_E_MEMBERNOTFOUND;
+                }
+                // foreach (var method in methods)
+                // {
+                //     var parameters = method.GetParameters();
+                //     var parameterDescriptions = string.Join
+                //         (", ", method.GetParameters()
+                //                     .Select(x => x.ParameterType + " " + x.Name)
+                //                     .ToArray());
+                //     Console.WriteLine("{0} {1} ({2}) {3}",
+                //                     method.ReturnType,
+                //                     method.Name,
+                //                     parameterDescriptions,
+                //                     method.IsSpecialName ? "special" : "");
+                // }
+
+                // Console.WriteLine($"wFlags:{wFlags}");
+                object? res = null;
+                MethodInfo? found_method = null;
+                object?[]? args = null;
+                switch (wFlags)
+                {
+                    case InvokeFlags.DISPATCH_PROPERTYGET:
+                        found_method = methods.Find(v => v.Name.StartsWith("get_"));
+                        break;
+                    case InvokeFlags.DISPATCH_PROPERTYPUT:
+                        found_method = methods.Find(v => v.Name.StartsWith("set_"));
+                        break;
+                    case InvokeFlags.DISPATCH_METHOD:
+                        args = DISPPARAMS_to_objectArray(pDispParams);
+                        List<Conversion> conversions = [];
+                        found_method = methods.Find(v =>
                         {
-                            return false;
-                        }
-                        conversions.Clear();
-                        for (int i = 0; i < parameters.Length; ++i)
-                        {
-                            object? arg = args[i];
-                            Type paramType = parameters[i].ParameterType;
-                            if (arg == null)
+                            ParameterInfo[] parameters = v.GetParameters();
+                            if (parameters.Length != pDispParams.cArgs)
                             {
-                                if (!paramType.IsValueType)
+                                return false;
+                            }
+                            conversions.Clear();
+                            for (int i = 0; i < parameters.Length; ++i)
+                            {
+                                object? arg = args[i];
+                                Type paramType = parameters[i].ParameterType;
+                                if (arg == null)
+                                {
+                                    if (!paramType.IsValueType)
+                                    {
+                                        continue;
+                                    }
+                                    return false;
+                                }
+                                Type argType = arg.GetType();
+                                bool param_is_integral = IsIntegral(paramType);
+                                bool arg_is_integral = IsIntegral(argType);
+                                if (param_is_integral != arg_is_integral)
+                                {
+                                    if (arg_is_integral && paramType == typeof(bool))
+                                    {
+                                        if (((IComparable)arg).CompareTo(1) == 0)
+                                        {
+                                            conversions.Add(new Conversion { value = true, idx = i });
+                                            continue;
+                                        }
+                                        else if (((IComparable)arg).CompareTo(0) == 0)
+                                        {
+                                            conversions.Add(new Conversion { value = false, idx = i });
+                                            continue;
+                                        }
+                                    }
+                                    return false;
+                                }
+                                if (param_is_integral)
+                                {
+                                    if (((IComparable)IntegralTypes[paramType].min_value).CompareTo(arg) > 0
+                                    || ((IComparable)IntegralTypes[paramType].max_value).CompareTo(arg) < 0)
+                                    {
+                                        return false;
+                                    }
+                                }
+                                if (paramType == argType) // handles value types
+                                {
+                                    continue;
+                                }
+                                if (paramType.IsAssignableFrom(argType))
                                 {
                                     continue;
                                 }
                                 return false;
                             }
-                            Type argType = arg.GetType();
-                            bool param_is_integral = IsIntegral(paramType);
-                            bool arg_is_integral = IsIntegral(argType);
-                            if (param_is_integral != arg_is_integral)
-                            {
-                                if (arg_is_integral && paramType == typeof(bool))
-                                {
-                                    if (((IComparable)arg).CompareTo(1) == 0)
-                                    {
-                                        conversions.Add(new Conversion { value = true, idx = i });
-                                        continue;
-                                    }
-                                    else if (((IComparable)arg).CompareTo(0) == 0)
-                                    {
-                                        conversions.Add(new Conversion { value = false, idx = i });
-                                        continue;
-                                    }
-                                }
-                                return false;
-                            }
-                            if (param_is_integral)
-                            {
-                                if (((IComparable)IntegralTypes[paramType].min_value).CompareTo(arg) > 0
-                                || ((IComparable)IntegralTypes[paramType].max_value).CompareTo(arg) < 0)
-                                {
-                                    return false;
-                                }
-                            }
-                            if (paramType == argType) // handles value types
-                            {
-                                continue;
-                            }
-                            if (paramType.IsAssignableFrom(argType))
-                            {
-                                continue;
-                            }
-                            return false;
-                        }
-                        return true;
-                    });
-                    if (found_method != null)
-                    {
-                        foreach (var conversion in conversions)
+                            return true;
+                        });
+                        if (found_method != null)
                         {
-                            args[conversion.idx] = conversion.value;
+                            foreach (var conversion in conversions)
+                            {
+                                args[conversion.idx] = conversion.value;
+                            }
                         }
+                        break;
+                }
+                if (found_method == null)
+                {
+                    return DISP_E_MEMBERNOTFOUND;
+                }
+                if (args == null)
+                {
+                    args = DISPPARAMS_to_objectArray(pDispParams);
+                }
+                res = found_method.Invoke(_obj, args);
+                if (VarResult != 0)
+                {
+                    if (NeedsWrapping(res))
+                    {
+                        Marshal.WriteInt16(VarResult, (short)VarEnum.VT_DISPATCH);
+                        Marshal.WriteIntPtr(VarResult, 8, Marshal.GetComInterfaceForObject(new Wrapper(res), typeof(IDispatch)));
                     }
-                    break;
-            }
-            if (found_method == null)
-            {
-                return DISP_E_MEMBERNOTFOUND;
-            }
-            if (args == null)
-            {
-                args = DISPPARAMS_to_objectArray(pDispParams);
-            }
-            res = found_method.Invoke(_obj, args);
-            if (VarResult != 0)
-            {
-                if (NeedsWrapping(res))
-                {
-                    Marshal.WriteInt16(VarResult, (short)VarEnum.VT_DISPATCH);
-                    Marshal.WriteIntPtr(VarResult, 8, Marshal.GetComInterfaceForObject(new Wrapper(res), typeof(IDispatch)));
+                    else
+                    {
+                        Marshal.GetNativeVariantForObject(res, VarResult);
+                    }
                 }
-                else
-                {
-                    Marshal.GetNativeVariantForObject(res, VarResult);
-                }
+                return 0;
             }
-            return 0;
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                throw;
+            }
         }
     }
 
