@@ -180,7 +180,7 @@ namespace AHK_DotNet_Interop
         private const uint DISP_E_UNKNOWNNAME = 0x80020006;
         private const uint DISP_E_MEMBERNOTFOUND = 0x80020003;
 
-        private object? _obj;
+        private object _obj;
         private Type _type;
 
         private Dictionary<Type, TypeEntry> _type_entries = [];
@@ -204,7 +204,7 @@ namespace AHK_DotNet_Interop
         public Wrapper(object obj) : this(obj, obj.GetType()) { }
         public Wrapper(Type type) : this(type, type) { }
 
-        public Wrapper(object? obj, Type type)
+        public Wrapper(object obj, Type type)
         {
             _obj = obj;
             _type = type;
@@ -436,6 +436,18 @@ namespace AHK_DotNet_Interop
                     }
                     return type == typeof(Int32);
                 case VarEnum.VT_BSTR: return type == typeof(string);
+                case VarEnum.VT_DISPATCH:
+                    nint pdispVal = Marshal.ReadIntPtr(variant + 8);
+                    Type otherType = ((Wrapper)Marshal.GetObjectForIUnknown(pdispVal))._obj.GetType();
+                    if (type == otherType) // handles value types
+                    {
+                        return true;
+                    }
+                    if (type.IsAssignableFrom(otherType))
+                    {
+                        return true;
+                    }
+                    return false;
             }
             return false;
         }
