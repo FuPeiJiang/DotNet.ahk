@@ -4,6 +4,8 @@ using System.Collections;
 using System.Reflection;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Loader;
+using System.IO.Pipes;
+using System.Text;
 
 namespace AHK_DotNet_Interop
 {
@@ -26,10 +28,7 @@ namespace AHK_DotNet_Interop
                 {
                     return 1;
                 }
-                if (out_IDispatch != 0)
-                {
-                    Marshal.WriteIntPtr(out_IDispatch, Marshal.GetComInterfaceForObject(new Wrapper(found_type), typeof(IDispatch)));
-                }
+                Marshal.WriteIntPtr(out_IDispatch, Marshal.GetComInterfaceForObject(new Wrapper(found_type), typeof(IDispatch)));
                 return 0;
             }
             catch (Exception e)
@@ -44,10 +43,7 @@ namespace AHK_DotNet_Interop
             try
             {
                 Assembly assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(path);
-                if (out_IDispatch != 0)
-                {
-                    Marshal.WriteIntPtr(out_IDispatch, Marshal.GetComInterfaceForObject(new Wrapper(assembly), typeof(IDispatch)));
-                }
+                Marshal.WriteIntPtr(out_IDispatch, Marshal.GetComInterfaceForObject(new Wrapper(assembly), typeof(IDispatch)));
                 return 0;
             }
             catch (Exception e)
@@ -57,7 +53,54 @@ namespace AHK_DotNet_Interop
             }
         }
 
-        static ArrayList _list = ["1", "2", "3"];
+        public static int CompileAssembly([MarshalAs(UnmanagedType.LPWStr)] string code, [MarshalAs(UnmanagedType.LPWStr)] string assemblyName, [MarshalAs(UnmanagedType.LPWStr)] string externalReferences, IntPtr out_IDispatch)
+        {
+            try
+            {
+                using var pipe = new NamedPipeClientStream(
+                    ".", // local machine
+                    "CSharp-Compiler-Wrapper",
+                    PipeDirection.InOut,
+                    PipeOptions.None
+                );
+
+                pipe.Connect();
+
+                using var reader = new BinaryReader(pipe, Encoding.UTF8, leaveOpen: true);
+                using var writer = new BinaryWriter(pipe, Encoding.UTF8, leaveOpen: true);
+
+                writer.Write(assemblyName);
+                writer.Write(externalReferences);
+                writer.Write(code);
+
+                string success = reader.ReadString();
+                switch (success)
+                {
+                    case "success":
+                        {
+                            long length = reader.Read7BitEncodedInt64();
+                            byte[] payload = reader.ReadBytes((int)length); // or manual loop if large
+
+                            using var ms = new MemoryStream(payload);
+                            Assembly assembly = AssemblyLoadContext.Default.LoadFromStream(ms);
+                            Marshal.WriteIntPtr(out_IDispatch, Marshal.GetComInterfaceForObject(new Wrapper(assembly), typeof(IDispatch)));
+                            return 0;
+                        }
+                    case "failure":
+                        Console.WriteLine(reader.ReadString());
+                        break;
+                }
+                Marshal.WriteIntPtr(out_IDispatch, 0);
+                return 1;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                throw;
+            }
+        }
+
+        static ArrayList _list = ["1", "2", "3", "4"];
 
         public static void Main()
         {
