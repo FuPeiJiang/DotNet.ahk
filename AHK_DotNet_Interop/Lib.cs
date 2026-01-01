@@ -11,6 +11,16 @@ namespace AHK_DotNet_Interop
 {
     public static class Lib
     {
+        public static bool DebugWriteLineEnabled { get; set; } = true;
+
+        public static void DebugWriteLine(string s)
+        {
+            if (DebugWriteLineEnabled)
+            {
+                Console.WriteLine(s);
+            }
+        }
+
         public static int Hello(IntPtr arg, int argLength)
         {
             Console.WriteLine("hello world");
@@ -33,7 +43,7 @@ namespace AHK_DotNet_Interop
             }
             catch (Exception e)
             {
-                Console.WriteLine(e);
+                DebugWriteLine(e.ToString());
                 throw;
             }
         }
@@ -48,7 +58,7 @@ namespace AHK_DotNet_Interop
             }
             catch (Exception e)
             {
-                Console.WriteLine(e);
+                DebugWriteLine(e.ToString());
                 throw;
             }
         }
@@ -95,7 +105,7 @@ namespace AHK_DotNet_Interop
             }
             catch (Exception e)
             {
-                Console.WriteLine(e);
+                DebugWriteLine(e.ToString());
                 throw;
             }
         }
@@ -175,19 +185,19 @@ namespace AHK_DotNet_Interop
 
         private Dictionary<Type, TypeEntry> _type_entries = [];
 
-        List<List<MethodInfo>?> _methods_list;
+        List<List<object>?> _methods_list;
         Dictionary<string, ListAndIdx> _methods_dict;
 
 
         struct TypeEntry
         {
-            public List<List<MethodInfo>?> methods_list;
+            public List<List<object>?> methods_list;
             public Dictionary<string, ListAndIdx> methods_dict;
         }
 
         struct ListAndIdx
         {
-            public List<MethodInfo> list; // this needs not be stored in _methods_dict
+            public List<object> list; // this needs not be stored in _methods_dict
             public int idx;
         }
 
@@ -275,19 +285,31 @@ namespace AHK_DotNet_Interop
                 {
                     _methods_list.Add(item.list);
                 }
+
+                foreach (var field in type.GetFields())
+                {
+                    ref var itemRef = ref CollectionsMarshal.GetValueRefOrAddDefault(_methods_dict, field.Name, out bool exists);
+                    if (!exists)
+                    {
+                        itemRef = new ListAndIdx { list = [], idx = idx_counter };
+                        ++idx_counter;
+                    }
+                    itemRef.list.Add(field);
+                    _methods_list.Add(itemRef.list);
+                }
             }
         }
 
         public uint GetTypeInfoCount(out uint pctinfo)
         {
-            Console.WriteLine("GetTypeInfoCount");
+            Lib.DebugWriteLine("GetTypeInfoCount");
             pctinfo = 0;
             return 0;
         }
 
         public uint GetTypeInfo(uint iTInfo, int lcid, out nint info)
         {
-            Console.WriteLine("GetTypeInfo");
+            Lib.DebugWriteLine("GetTypeInfo");
             info = 0;
             return 0;
         }
@@ -308,21 +330,30 @@ namespace AHK_DotNet_Interop
         }
         public static readonly int sizeof_VARIANT = Marshal.SizeOf<nint>() * 2 + 0x8;
 
-        private static object?[] DISPPARAMS_to_objectArray(DISPPARAMS pDispParams)
+        public static object? VariantToObject(nint variant, Type type)
+        {
+            object? obj = Marshal.GetObjectForNativeVariant(variant);
+            switch (obj)
+            {
+                case Wrapper wrapper:
+                    return wrapper._obj;
+                case Int32 maybe_bool:
+                    if (type == typeof(bool) && (maybe_bool == 0 || maybe_bool == 1))
+                    {
+                        return Convert.ToBoolean(maybe_bool);
+                    }
+                    return maybe_bool;
+                default:
+                    return obj;
+            }
+        }
+
+        public static object?[] DISPPARAMS_to_objectArray(DISPPARAMS pDispParams, ParameterInfo[] parameters)
         {
             object?[] arr = new object[pDispParams.cArgs];
             for (int i = arr.Length - 1, j = 0; i >= 0; --i, j += sizeof_VARIANT)
             {
-                object? obj = Marshal.GetObjectForNativeVariant(pDispParams.rgvarg + j);
-                switch (obj)
-                {
-                    case Wrapper wrapper:
-                        arr[i] = wrapper._obj;
-                        break;
-                    default:
-                        arr[i] = obj;
-                        break;
-                }
+                arr[i] = VariantToObject(pDispParams.rgvarg + j, parameters[i].ParameterType);
             }
             return arr;
         }
@@ -354,6 +385,19 @@ namespace AHK_DotNet_Interop
             return true;
         }
 
+        public void WriteToVARIANT(object? obj, nint VarResult)
+        {
+            if (NeedsWrapping(obj))
+            {
+                Marshal.WriteInt16(VarResult, (short)VarEnum.VT_DISPATCH);
+                Marshal.WriteIntPtr(VarResult, 8, Marshal.GetComInterfaceForObject(new Wrapper(obj), typeof(IDispatch)));
+            }
+            else
+            {
+                Marshal.GetNativeVariantForObject(obj, VarResult);
+            }
+        }
+
         enum type_enum
         {
             invalid = -1,
@@ -372,6 +416,30 @@ namespace AHK_DotNet_Interop
             return typeCode > 4 && typeCode < 13;
         }
 
+        public static bool VariantCanConvert(nint variant, Type type)
+        {
+            // Console.WriteLine((VarEnum)Marshal.ReadInt16(variant));
+            switch ((VarEnum)Marshal.ReadInt16(variant))
+            {
+                case VarEnum.VT_I4:
+                    if (type == typeof(bool))
+                    {
+                        Int32 value = Marshal.ReadInt32(variant + 8);
+                        if (value == 0 || value == 1)
+                        {
+                            return true;
+                        }
+                    }
+                    if (type.IsEnum && type.GetEnumUnderlyingType() == typeof(Int32))
+                    {
+                        return true;
+                    }
+                    return type == typeof(Int32);
+                case VarEnum.VT_BSTR: return type == typeof(string);
+            }
+            return false;
+        }
+
         static readonly Dictionary<Type, TypeInfo> IntegralTypes = new()
         {
             [typeof(sbyte)] = new TypeInfo { min_value = sbyte.MinValue, max_value = sbyte.MaxValue },
@@ -384,18 +452,12 @@ namespace AHK_DotNet_Interop
             [typeof(ulong)] = new TypeInfo { min_value = ulong.MinValue, max_value = ulong.MaxValue },
         };
 
-        struct Conversion
-        {
-            public required object? value;
-            public required int idx;
-        }
-
         public uint Invoke(int dispIdMember, ref Guid riid, int lcid, InvokeFlags wFlags, DISPPARAMS pDispParams, nint VarResult, nint pExcepInfo, nint puArgErr)
         {
             try
             {
                 // Console.WriteLine($"dispId: {dispIdMember}");
-                List<MethodInfo>? methods;
+                IEnumerable<object>? methods_or_field;
                 if (dispIdMember < 0)
                 {
                     if (dispIdMember == DISPID_NEWENUM
@@ -413,134 +475,73 @@ namespace AHK_DotNet_Interop
                     }
                     return DISP_E_MEMBERNOTFOUND;
                 }
-                if (dispIdMember >= _methods_list.Count || ((methods = _methods_list[dispIdMember]) == null)) // get_Item/set_Item(always dispId=0) could be null
+                if (dispIdMember >= _methods_list.Count || ((methods_or_field = _methods_list[dispIdMember]) == null)) // get_Item/set_Item(always dispId=0) could be null
                 {
                     return DISP_E_MEMBERNOTFOUND;
                 }
-                // foreach (var method in methods)
-                // {
-                //     var parameters = method.GetParameters();
-                //     var parameterDescriptions = string.Join
-                //         (", ", method.GetParameters()
-                //                     .Select(x => x.ParameterType + " " + x.Name)
-                //                     .ToArray());
-                //     Console.WriteLine("{0} {1} ({2}) {3}",
-                //                     method.ReturnType,
-                //                     method.Name,
-                //                     parameterDescriptions,
-                //                     method.IsSpecialName ? "special" : "");
-                // }
 
-                // Console.WriteLine($"wFlags:{wFlags}");
-                object? res = null;
-                MethodInfo? found_method = null;
-                object?[]? args = null;
-                switch (wFlags)
+                switch (methods_or_field.First())
                 {
-                    case InvokeFlags.DISPATCH_PROPERTYGET:
-                        found_method = methods.Find(v => v.Name.StartsWith("get_"));
-                        break;
-                    case InvokeFlags.DISPATCH_PROPERTYPUT:
-                        found_method = methods.Find(v => v.Name.StartsWith("set_"));
-                        break;
-                    case InvokeFlags.DISPATCH_METHOD:
-                        args = DISPPARAMS_to_objectArray(pDispParams);
-                        List<Conversion> conversions = [];
-                        found_method = methods.Find(v =>
+                    case MethodInfo method:
+                        MethodInfo? found_method = null;
+                        ParameterInfo[]? found_parameters = null;
+                        found_method = (MethodInfo?)methods_or_field.FirstOrDefault(v =>
                         {
-                            ParameterInfo[] parameters = v.GetParameters();
+                            MethodInfo method = (MethodInfo)v;
+                            ParameterInfo[] parameters = method.GetParameters();
                             if (parameters.Length != pDispParams.cArgs)
                             {
                                 return false;
                             }
-                            conversions.Clear();
-                            for (int i = 0; i < parameters.Length; ++i)
+                            nint j = pDispParams.rgvarg;
+                            for (int i = 0; i < parameters.Length; ++i, j += sizeof_VARIANT)
                             {
-                                object? arg = args[i];
-                                Type paramType = parameters[i].ParameterType;
-                                if (arg == null)
+                                if (!VariantCanConvert(j, parameters[i].ParameterType))
                                 {
-                                    if (!paramType.IsValueType)
-                                    {
-                                        continue;
-                                    }
                                     return false;
                                 }
-                                Type argType = arg.GetType();
-                                bool param_is_integral = IsIntegral(paramType);
-                                bool arg_is_integral = IsIntegral(argType);
-                                if (param_is_integral != arg_is_integral)
-                                {
-                                    if (arg_is_integral && paramType == typeof(bool))
-                                    {
-                                        if (((IComparable)arg).CompareTo(1) == 0)
-                                        {
-                                            conversions.Add(new Conversion { value = true, idx = i });
-                                            continue;
-                                        }
-                                        else if (((IComparable)arg).CompareTo(0) == 0)
-                                        {
-                                            conversions.Add(new Conversion { value = false, idx = i });
-                                            continue;
-                                        }
-                                    }
-                                    return false;
-                                }
-                                if (param_is_integral)
-                                {
-                                    if (((IComparable)IntegralTypes[paramType].min_value).CompareTo(arg) > 0
-                                    || ((IComparable)IntegralTypes[paramType].max_value).CompareTo(arg) < 0)
-                                    {
-                                        return false;
-                                    }
-                                }
-                                if (paramType == argType) // handles value types
-                                {
-                                    continue;
-                                }
-                                if (paramType.IsAssignableFrom(argType))
-                                {
-                                    continue;
-                                }
-                                return false;
                             }
+                            found_parameters = parameters;
                             return true;
                         });
-                        if (found_method != null)
+                        if (found_method == null)
                         {
-                            foreach (var conversion in conversions)
-                            {
-                                args[conversion.idx] = conversion.value;
-                            }
+                            return DISP_E_MEMBERNOTFOUND;
+                        }
+                        var args = DISPPARAMS_to_objectArray(pDispParams, found_parameters!);
+                        object? res = found_method.Invoke(_obj, args);
+                        if (VarResult != 0)
+                        {
+                            WriteToVARIANT(res, VarResult);
                         }
                         break;
-                }
-                if (found_method == null)
-                {
-                    return DISP_E_MEMBERNOTFOUND;
-                }
-                if (args == null)
-                {
-                    args = DISPPARAMS_to_objectArray(pDispParams);
-                }
-                res = found_method.Invoke(_obj, args);
-                if (VarResult != 0)
-                {
-                    if (NeedsWrapping(res))
-                    {
-                        Marshal.WriteInt16(VarResult, (short)VarEnum.VT_DISPATCH);
-                        Marshal.WriteIntPtr(VarResult, 8, Marshal.GetComInterfaceForObject(new Wrapper(res), typeof(IDispatch)));
-                    }
-                    else
-                    {
-                        Marshal.GetNativeVariantForObject(res, VarResult);
-                    }
+                    case FieldInfo field:
+                        switch (wFlags)
+                        {
+                            case InvokeFlags.DISPATCH_PROPERTYGET:
+                                WriteToVARIANT(field.GetValue(_obj), VarResult);
+                                break;
+                            case InvokeFlags.DISPATCH_PROPERTYPUT:
+                                if (pDispParams.cArgs != 1)
+                                {
+                                    return DISP_E_MEMBERNOTFOUND;
+                                }
+                                if (!VariantCanConvert(pDispParams.rgvarg, field.FieldType))
+                                {
+                                    return DISP_E_MEMBERNOTFOUND;
+                                }
+                                field.SetValue(_obj, VariantToObject(pDispParams.rgvarg, field.FieldType));
+                                break;
+                            default:
+                                return DISP_E_MEMBERNOTFOUND;
+                        }
+                        break;
                 }
                 return 0;
             }
             catch (Exception e)
             {
-                Console.WriteLine(e);
+                Lib.DebugWriteLine(e.ToString());
                 throw;
             }
         }

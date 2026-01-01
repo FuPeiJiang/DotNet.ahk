@@ -69,6 +69,9 @@ class DotNet {
 
         this.compileServerStarted := false
 
+        _Type := DotNet.using("System.Type")
+        _Type.GetType("System.Console, System.Console")
+
         UTF8(str) {
             ; StrPut: In 2-parameter mode, this function returns the required buffer size in bytes,
             ; including space for the null-terminator.
