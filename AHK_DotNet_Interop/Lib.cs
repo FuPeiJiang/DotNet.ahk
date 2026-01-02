@@ -398,24 +398,6 @@ namespace AHK_DotNet_Interop
             }
         }
 
-        enum type_enum
-        {
-            invalid = -1,
-            integer = 0,
-        }
-
-        class TypeInfo
-        {
-            public required object min_value;
-            public required object max_value;
-        }
-
-        public static bool IsIntegral(Type type)
-        {
-            var typeCode = (int)Type.GetTypeCode(type);
-            return typeCode > 4 && typeCode < 13;
-        }
-
         public static bool VariantCanConvert(nint variant, Type type)
         {
             // Console.WriteLine((VarEnum)Marshal.ReadInt16(variant));
@@ -435,6 +417,8 @@ namespace AHK_DotNet_Interop
                         return true;
                     }
                     return type == typeof(Int32);
+                case VarEnum.VT_I8: return type == typeof(Int64);
+                case VarEnum.VT_R8: return type == typeof(double);
                 case VarEnum.VT_BSTR: return type == typeof(string);
                 case VarEnum.VT_DISPATCH:
                     nint pdispVal = Marshal.ReadIntPtr(variant + 8);
@@ -451,18 +435,6 @@ namespace AHK_DotNet_Interop
             }
             return false;
         }
-
-        static readonly Dictionary<Type, TypeInfo> IntegralTypes = new()
-        {
-            [typeof(sbyte)] = new TypeInfo { min_value = sbyte.MinValue, max_value = sbyte.MaxValue },
-            [typeof(byte)] = new TypeInfo { min_value = byte.MinValue, max_value = byte.MaxValue },
-            [typeof(short)] = new TypeInfo { min_value = short.MinValue, max_value = short.MaxValue },
-            [typeof(ushort)] = new TypeInfo { min_value = ushort.MinValue, max_value = ushort.MaxValue },
-            [typeof(int)] = new TypeInfo { min_value = int.MinValue, max_value = int.MaxValue },
-            [typeof(uint)] = new TypeInfo { min_value = uint.MinValue, max_value = uint.MaxValue },
-            [typeof(long)] = new TypeInfo { min_value = long.MinValue, max_value = long.MaxValue },
-            [typeof(ulong)] = new TypeInfo { min_value = ulong.MinValue, max_value = ulong.MaxValue },
-        };
 
         public uint Invoke(int dispIdMember, ref Guid riid, int lcid, InvokeFlags wFlags, DISPPARAMS pDispParams, nint VarResult, nint pExcepInfo, nint puArgErr)
         {
