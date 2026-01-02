@@ -350,10 +350,28 @@ namespace AHK_DotNet_Interop
 
         public static object?[] DISPPARAMS_to_objectArray(DISPPARAMS pDispParams, ParameterInfo[] parameters)
         {
-            object?[] arr = new object[pDispParams.cArgs];
-            for (int i = arr.Length - 1, j = 0; i >= 0; --i, j += sizeof_VARIANT)
+            bool isVariadic = parameters.Length > 0 && parameters[parameters.Length - 1].IsDefined(typeof(ParamArrayAttribute));
+            object?[] arr = new object[parameters.Length];
+            int length = parameters.Length;
+            if (isVariadic)
             {
-                arr[i] = VariantToObject(pDispParams.rgvarg + j, parameters[i].ParameterType);
+                --length;
+            }
+            nint j = pDispParams.rgvarg + (sizeof_VARIANT * (pDispParams.cArgs - 1));
+            for (int i = 0; i < length; ++i, j -= sizeof_VARIANT)
+            {
+                arr[i] = VariantToObject(j, parameters[i].ParameterType);
+            }
+            if (isVariadic)
+            {
+                object?[] variadicParams = new object?[pDispParams.cArgs - length];
+                arr[arr.Length - 1] = variadicParams;
+                Type elementType = parameters[parameters.Length - 1].ParameterType.GetElementType()!;
+                for (int i = 0; i < variadicParams.Length; ++i, j -= sizeof_VARIANT)
+                {
+                    object? a = VariantToObject(j, elementType);
+                    variadicParams[i] = a;
+                }
             }
             return arr;
         }
@@ -398,8 +416,22 @@ namespace AHK_DotNet_Interop
             }
         }
 
-        public static bool VariantCanConvert(nint variant, Type type)
+        public static bool VariantCanConvertToParam(nint variant, ParameterInfo parameterInfo)
         {
+            Type type = parameterInfo.ParameterType;
+            if (parameterInfo.IsDefined(typeof(ParamArrayAttribute)))
+            {
+                type = type.GetElementType()!;
+            }
+            return VariantCanConvertToType(variant, type);
+        }
+
+        public static bool VariantCanConvertToType(nint variant, Type type)
+        {
+            if (type == typeof(object))
+            {
+                return true;
+            }
             // Console.WriteLine((VarEnum)Marshal.ReadInt16(variant));
             switch ((VarEnum)Marshal.ReadInt16(variant))
             {
@@ -473,16 +505,35 @@ namespace AHK_DotNet_Interop
                         {
                             MethodInfo method = (MethodInfo)v;
                             ParameterInfo[] parameters = method.GetParameters();
+                            bool isVariadic = parameters.Length > 0 && parameters[parameters.Length - 1].IsDefined(typeof(ParamArrayAttribute));
                             if (parameters.Length != pDispParams.cArgs)
                             {
-                                return false;
-                            }
-                            nint j = pDispParams.rgvarg;
-                            for (int i = 0; i < parameters.Length; ++i, j += sizeof_VARIANT)
-                            {
-                                if (!VariantCanConvert(j, parameters[i].ParameterType))
+                                if (!isVariadic)
                                 {
                                     return false;
+                                }
+                                if (pDispParams.cArgs < parameters.Length - 1)
+                                {
+                                    return false;
+                                }
+                            }
+                            nint j = pDispParams.rgvarg + (sizeof_VARIANT * (pDispParams.cArgs - 1));
+                            for (int i = 0; i < parameters.Length; ++i, j -= sizeof_VARIANT)
+                            {
+                                if (!VariantCanConvertToParam(j, parameters[i]))
+                                {
+                                    return false;
+                                }
+                            }
+                            if (isVariadic)
+                            {
+                                ParameterInfo lastParam = parameters[parameters.Length - 1];
+                                for (; j >= pDispParams.rgvarg; j -= sizeof_VARIANT)
+                                {
+                                    if (!VariantCanConvertToParam(j, lastParam))
+                                    {
+                                        return false;
+                                    }
                                 }
                             }
                             found_parameters = parameters;
@@ -510,7 +561,7 @@ namespace AHK_DotNet_Interop
                                 {
                                     return DISP_E_MEMBERNOTFOUND;
                                 }
-                                if (!VariantCanConvert(pDispParams.rgvarg, field.FieldType))
+                                if (!VariantCanConvertToType(pDispParams.rgvarg, field.FieldType))
                                 {
                                     return DISP_E_MEMBERNOTFOUND;
                                 }
