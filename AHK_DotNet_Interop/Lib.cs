@@ -240,6 +240,57 @@ namespace AHK_DotNet_Interop
             public int idx;
         }
 
+        public void AppendMethods(Type type, bool skipInstanceMethods)
+        {
+            HashSet<MethodInfo> properties = new();
+            foreach (var item in type.GetProperties())
+            {
+                MethodInfo? method = item.GetMethod;
+                if (method != null)
+                {
+                    properties.Add(method);
+                }
+                method = item.SetMethod;
+                if (method != null)
+                {
+                    properties.Add(method);
+                }
+            }
+            // Console.WriteLine("++++++++++++++++++++");
+            // Console.WriteLine(_type.ToString());
+            // foreach (var method in type.GetMethods(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static))
+            foreach (var method in type.GetMethods())
+            {
+                if (skipInstanceMethods && !method.IsStatic)
+                {
+                    continue;
+                }
+                var name = method.Name;
+                if (properties.Contains(method))
+                {
+                    name = name[4..];
+                }
+
+                // var parameters = method.GetParameters();
+                // var parameterDescriptions = string.Join
+                //     (", ", method.GetParameters()
+                //                 .Select(x => x.ParameterType + " " + x.Name)
+                //                 .ToArray());
+                // Console.WriteLine("{0} {1} ({2}) {3}",
+                //                 method.ReturnType,
+                //                 method.Name,
+                //                 parameterDescriptions,
+                //                 method.IsSpecialName ? "special" : "");
+
+                ref var itemRef = ref CollectionsMarshal.GetValueRefOrAddDefault(_methods_dict, name, out bool exists);
+                if (!exists)
+                {
+                    itemRef = new ListAndIdx { list = [], idx = _methods_dict.Count };
+                }
+                itemRef.list.Add(method);
+            }
+        }
+
         public Wrapper(object obj) : this(obj, obj.GetType()) { }
         public Wrapper(Type type) : this(type, type) { }
 
@@ -263,62 +314,21 @@ namespace AHK_DotNet_Interop
                     methods_list = _methods_list,
                     methods_dict = _methods_dict
                 };
-                HashSet<MethodInfo> properties = new();
-                foreach (var item in type.GetProperties())
+                if (obj == (object)type)
                 {
-                    MethodInfo? method = item.GetMethod;
-                    if (method != null)
-                    {
-                        properties.Add(method);
-                    }
-                    method = item.SetMethod;
-                    if (method != null)
-                    {
-                        properties.Add(method);
-                    }
-                }
-                int idx_counter = 1;
-                // Console.WriteLine("++++++++++++++++++++");
-                // Console.WriteLine(_type.ToString());
-                // foreach (var method in type.GetMethods(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static))
-                foreach (var method in type.GetMethods())
+                    AppendMethods(type, true);
+                    AppendMethods(type.GetType(), false);
+                } else
                 {
-                    // if (method.IsStatic)
-                    // {
-                    //     continue;
-                    // }
-                    var name = method.Name;
-                    if (properties.Contains(method))
-                    {
-                        name = name[4..];
-                    }
-
-                    // var parameters = method.GetParameters();
-                    // var parameterDescriptions = string.Join
-                    //     (", ", method.GetParameters()
-                    //                 .Select(x => x.ParameterType + " " + x.Name)
-                    //                 .ToArray());
-                    // Console.WriteLine("{0} {1} ({2}) {3}",
-                    //                 method.ReturnType,
-                    //                 method.Name,
-                    //                 parameterDescriptions,
-                    //                 method.IsSpecialName ? "special" : "");
-
-                    ref var itemRef = ref CollectionsMarshal.GetValueRefOrAddDefault(_methods_dict, name, out bool exists);
-                    if (!exists)
-                    {
-                        itemRef = new ListAndIdx { list = [], idx = idx_counter };
-                        ++idx_counter;
-                    }
-                    itemRef.list.Add(method);
+                    AppendMethods(type, false);
                 }
-                if (_methods_dict.TryGetValue("Item", out var value))
+                if (_obj is Type)
+                {
+                    _methods_list.Add(((Type)_obj).GetConstructors().Cast<object>().ToList());
+                }
+                else if (_methods_dict.TryGetValue("Item", out var value))
                 {
                     _methods_list.Add(value.list);
-                }
-                else if (_obj is Type)
-                {
-                    _methods_list.Add(_type.GetConstructors().Cast<object>().ToList());
                 }
                 else
                 {
@@ -334,8 +344,7 @@ namespace AHK_DotNet_Interop
                     ref var itemRef = ref CollectionsMarshal.GetValueRefOrAddDefault(_methods_dict, field.Name, out bool exists);
                     if (!exists)
                     {
-                        itemRef = new ListAndIdx { list = [], idx = idx_counter };
-                        ++idx_counter;
+                        itemRef = new ListAndIdx { list = [], idx = _methods_dict.Count };
                     }
                     itemRef.list.Add(field);
                     _methods_list.Add(itemRef.list);
@@ -407,13 +416,14 @@ namespace AHK_DotNet_Interop
             }
             if (isVariadic)
             {
-                object?[] variadicParams = new object?[pDispParams.cArgs - length];
-                arr[arr.Length - 1] = variadicParams;
                 Type elementType = parameters[parameters.Length - 1].ParameterType.GetElementType()!;
+                Array variadicParams = Array.CreateInstance(elementType, pDispParams.cArgs - length);
+
+                arr[arr.Length - 1] = variadicParams;
                 for (int i = 0; i < variadicParams.Length; ++i, j -= sizeof_VARIANT)
                 {
                     object? a = VariantToObject(j, elementType);
-                    variadicParams[i] = a;
+                    variadicParams.SetValue(a, i);
                 }
             }
             return arr;
