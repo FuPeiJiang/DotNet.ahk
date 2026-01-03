@@ -110,6 +110,36 @@ namespace AHK_DotNet_Interop
             }
         }
 
+        public static Array CreateArray(Type elementType, params object?[] values)
+        {
+            Array arr = Array.CreateInstance(elementType, values.Length);
+
+            if (elementType == typeof(bool))
+            {
+                for (int i = 0; i < values.Length; i++)
+                {
+                    object? val = values[i];
+                    if (val != null && val.GetType() == typeof(int) && ((int)val == 0 || (int)val == 1))
+                    {
+                        arr.SetValue((int)val == 1, i);
+                    }
+                    else
+                    {
+                        throw new ArgumentException($"Invalid value for bool array, got: {val}");
+                    }
+                }
+            }
+            else
+            {
+                for (int i = 0; i < values.Length; i++)
+                {
+                    arr.SetValue(values[i], i); // throws if incompatible
+                }
+            }
+
+            return arr;
+        }
+
         static ArrayList _list = ["1", "2", "3", "4"];
 
         public static void Main()

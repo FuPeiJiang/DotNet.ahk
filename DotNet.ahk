@@ -72,6 +72,8 @@ class DotNet {
         _Type := DotNet.using("System.Type")
         _Type.GetType("System.Console, System.Console")
 
+        DotNet.Lib := DotNet.using("AHK_DotNet_Interop.Lib")
+
         UTF8(str) {
             ; StrPut: In 2-parameter mode, this function returns the required buffer size in bytes,
             ; including space for the null-terminator.
@@ -160,6 +162,10 @@ class DotNet {
         }
         DllCall(DotNet.__CompileAssembly_delegate, "WStr", code, "WStr", assemblyName, "WStr", externalReferences, "Ptr*", IDisPatch:=ComValue(9, 0))
         return IDisPatch
+    }
+
+    static Array(elementType, args) {
+        return DotNet.Lib.CreateArray(elementType, args*)
     }
 
     static using(FullName) {
