@@ -97,7 +97,7 @@ namespace AHK_DotNet_Interop
                             return 0;
                         }
                     case "failure":
-                        Console.WriteLine(reader.ReadString());
+                        DebugWriteLine(reader.ReadString());
                         break;
                 }
                 Marshal.WriteIntPtr(out_IDispatch, 0);
@@ -173,7 +173,16 @@ namespace AHK_DotNet_Interop
         DISPATCH_PROPERTYPUTREF = 8
     }
 
-    public class Wrapper : IDispatch
+    [ComImport]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [Guid("B196B283-BAB4-101A-B69C-00AA00341D07")]
+    internal interface IProvideClassInfo
+    {
+        [PreserveSig]
+        uint GetClassInfo(out IntPtr info);
+    }
+
+    public class Wrapper : IDispatch, IProvideClassInfo, ITypeInfo
     {
         private const int DISPID_UNKNOWN = -1;
         private const int DISPID_NEWENUM = -4;
@@ -580,6 +589,141 @@ namespace AHK_DotNet_Interop
                 throw;
             }
         }
+
+        public uint GetClassInfo(out nint info)
+        {
+            info = Marshal.GetComInterfaceForObject(this, typeof(ITypeInfo));
+            return 0;
+        }
+
+        public void GetTypeAttr(out nint ppTypeAttr)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void GetTypeComp(out ITypeComp ppTComp)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void GetFuncDesc(int index, out nint ppFuncDesc)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void GetVarDesc(int index, out nint ppVarDesc)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void GetNames(int memid, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2), Out] string[] rgBstrNames, int cMaxNames, out int pcNames)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void GetRefTypeOfImplType(int index, out int href)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void GetImplTypeFlags(int index, out IMPLTYPEFLAGS pImplTypeFlags)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void GetIDsOfNames([In, MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPWStr, SizeParamIndex = 1)] string[] rgszNames, int cNames, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1), Out] int[] pMemId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void Invoke([MarshalAs(UnmanagedType.IUnknown)] object pvInstance, int memid, short wFlags, ref DISPPARAMS pDispParams, nint pVarResult, nint pExcepInfo, out int puArgErr)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void GetDocumentation(int index, out string strName, nint strDocString, nint dwHelpContext, nint strHelpFile)
+        {
+            if (index == DISPID_UNKNOWN)
+            {
+                strName = _obj.GetType().Name;
+                return;
+            }
+            throw new NotImplementedException();
+        }
+
+        public void GetDllEntry(int memid, INVOKEKIND invKind, nint pBstrDllName, nint pBstrName, nint pwOrdinal)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void GetRefTypeInfo(int hRef, out ITypeInfo ppTI)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void AddressOfMember(int memid, INVOKEKIND invKind, out nint ppv)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void CreateInstance([MarshalAs(UnmanagedType.IUnknown)] object? pUnkOuter, [In] ref Guid riid, [MarshalAs(UnmanagedType.IUnknown), Out] out object ppvObj)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void GetMops(int memid, out string? pBstrMops)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void GetContainingTypeLib(out ITypeLib ppTLB, out int pIndex)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void ReleaseTypeAttr(nint pTypeAttr)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void ReleaseFuncDesc(nint pFuncDesc)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void ReleaseVarDesc(nint pVarDesc)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+    [Guid("00020401-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [ComImport]
+    public interface ITypeInfo
+    {
+        void GetTypeAttr(out IntPtr ppTypeAttr);
+        void GetTypeComp(out ITypeComp ppTComp);
+        void GetFuncDesc(int index, out IntPtr ppFuncDesc);
+        void GetVarDesc(int index, out IntPtr ppVarDesc);
+        void GetNames(int memid, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2), Out] string[] rgBstrNames, int cMaxNames, out int pcNames);
+        void GetRefTypeOfImplType(int index, out int href);
+        void GetImplTypeFlags(int index, out IMPLTYPEFLAGS pImplTypeFlags);
+        void GetIDsOfNames([MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPWStr, SizeParamIndex = 1), In] string[] rgszNames, int cNames, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1), Out] int[] pMemId);
+        void Invoke([MarshalAs(UnmanagedType.IUnknown)] object pvInstance, int memid, short wFlags, ref DISPPARAMS pDispParams, IntPtr pVarResult, IntPtr pExcepInfo, out int puArgErr);
+        void GetDocumentation(int index, out string strName, nint strDocString, nint dwHelpContext, nint strHelpFile);
+        void GetDllEntry(int memid, INVOKEKIND invKind, IntPtr pBstrDllName, IntPtr pBstrName, IntPtr pwOrdinal);
+        void GetRefTypeInfo(int hRef, out ITypeInfo ppTI);
+        void AddressOfMember(int memid, INVOKEKIND invKind, out IntPtr ppv);
+        void CreateInstance([MarshalAs(UnmanagedType.IUnknown)] object? pUnkOuter, [In] ref Guid riid, [MarshalAs(UnmanagedType.IUnknown), Out] out object ppvObj);
+        void GetMops(int memid, out string? pBstrMops);
+        void GetContainingTypeLib(out ITypeLib ppTLB, out int pIndex);
+        [PreserveSig]
+        void ReleaseTypeAttr(IntPtr pTypeAttr);
+        [PreserveSig]
+        void ReleaseFuncDesc(IntPtr pFuncDesc);
+        [PreserveSig]
+        void ReleaseVarDesc(IntPtr pVarDesc);
     }
 
     [Guid("00020404-0000-0000-C000-000000000046")]
