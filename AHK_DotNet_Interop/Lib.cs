@@ -316,6 +316,10 @@ namespace AHK_DotNet_Interop
                 {
                     _methods_list.Add(value.list);
                 }
+                else if (_obj is Type)
+                {
+                    _methods_list.Add(_type.GetConstructors().Cast<object>().ToList());
+                }
                 else
                 {
                     _methods_list.Add(null);
@@ -534,11 +538,6 @@ namespace AHK_DotNet_Interop
                 {
                     return DISP_E_MEMBERNOTFOUND;
                 }
-                bool isConstructor = dispIdMember == 0 && _obj is Type;
-                if (isConstructor)
-                {
-                    methods_or_field = _type.GetConstructors();
-                }
 
                 switch (methods_or_field.First())
                 {
@@ -588,7 +587,8 @@ namespace AHK_DotNet_Interop
                             return DISP_E_MEMBERNOTFOUND;
                         }
                         var args = DISPPARAMS_to_objectArray(pDispParams, found_parameters!);
-                        object? res = isConstructor ? ((ConstructorInfo)found_method).Invoke(args) : found_method.Invoke(_obj, args);
+                        bool isConstructor = dispIdMember == 0 && _obj is Type;
+                        object? res = isConstructor ? ((ConstructorInfo)found_method).Invoke(args) : ((MethodInfo)found_method).Invoke(_obj, args);
                         if (VarResult != 0)
                         {
                             WriteToVARIANT(res, VarResult);
