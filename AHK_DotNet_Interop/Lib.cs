@@ -488,6 +488,7 @@ namespace AHK_DotNet_Interop
             // Console.WriteLine((VarEnum)Marshal.ReadInt16(variant));
             switch ((VarEnum)Marshal.ReadInt16(variant))
             {
+                case VarEnum.VT_EMPTY: return !type.IsValueType;
                 case VarEnum.VT_I4:
                     if (type == typeof(bool))
                     {

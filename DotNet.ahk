@@ -134,6 +134,8 @@ class DotNet {
         }
     }
 
+    static Null := ComValue(0, 0) ;VT_EMPTY
+
     static LoadAssembly(path) {
         DllCall(DotNet.__LoadAssembly_delegate, "WStr", path, "Ptr*", IDisPatch:=ComValue(9, 0))
         return IDisPatch
