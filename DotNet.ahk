@@ -55,11 +55,13 @@ class DotNet {
         NumPut("Ptr", TRUSTED_PLATFORM_ASSEMBLIES_VALUE.Ptr, propertyValues)
         ; https://github.com/dotnet/runtime/blob/main/src/coreclr/hosts/inc/coreclrhost.h
         DllCall("coreclr\coreclr_initialize", "Ptr", UTF8(exeDir), "AStr", "AutoHotkeyHost", "Int", 1, "Ptr", propertyKeys, "Ptr", propertyValues, "Ptr*", &hostHandle:=0, "Uint*", &domainId:=0)
-        DllCall("coreclr\coreclr_create_delegate", "Ptr", hostHandle, "Uint", domainId, "AStr", "System.Private.CoreLib", "AStr", "Internal.Runtime.InteropServices.ComponentActivator", "AStr", "LoadAssemblyBytes", "Ptr*", &load_assembly_bytes:=0)
+        ; DllCall("coreclr\coreclr_create_delegate", "Ptr", hostHandle, "Uint", domainId, "AStr", "System.Private.CoreLib", "AStr", "Internal.Runtime.InteropServices.ComponentActivator", "AStr", "LoadAssemblyBytes", "Ptr*", &load_assembly_bytes:=0)
         ; https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/Internal/Runtime/InteropServices/ComponentActivator.cs
         ; https://github.com/dotnet/runtime/blob/main/src/native/corehost/coreclr_delegates.h
         DllCall("coreclr\coreclr_create_delegate", "Ptr", hostHandle, "Uint", domainId, "AStr", "AHK_DotNet_Interop", "AStr", "AHK_DotNet_Interop.Lib", "AStr", "GetClass", "Ptr*", &GetClass_delegate:=0)
         DotNet.__GetClass_delegate := GetClass_delegate
+        DllCall("coreclr\coreclr_create_delegate", "Ptr", hostHandle, "Uint", domainId, "AStr", "AHK_DotNet_Interop", "AStr", "AHK_DotNet_Interop.Lib", "AStr", "GetType", "Ptr*", &GetType_delegate:=0)
+        DotNet.__GetType_delegate := GetType_delegate
         DllCall("coreclr\coreclr_create_delegate", "Ptr", hostHandle, "Uint", domainId, "AStr", "AHK_DotNet_Interop", "AStr", "AHK_DotNet_Interop.Lib", "AStr", "LoadAssembly", "Ptr*", &LoadAssembly_delegate:=0)
         DotNet.__LoadAssembly_delegate := LoadAssembly_delegate
         DllCall("coreclr\coreclr_create_delegate", "Ptr", hostHandle, "Uint", domainId, "AStr", "AHK_DotNet_Interop", "AStr", "AHK_DotNet_Interop.Lib", "AStr", "CompileAssembly", "Ptr*", &CompileAssembly_delegate:=0)
@@ -69,10 +71,9 @@ class DotNet {
 
         this.compileServerStarted := false
 
-        _Type := DotNet.using("System.Type")
-        _Type.GetType("System.Console, System.Console")
+        DotNet.Type("System.Console, System.Console")
 
-        DotNet.Lib := DotNet.using("AHK_DotNet_Interop.Lib")
+        DotNet.Lib := DotNet.Type("AHK_DotNet_Interop.Lib, AHK_DotNet_Interop")
 
         UTF8(str) {
             ; StrPut: In 2-parameter mode, this function returns the required buffer size in bytes,
@@ -172,6 +173,11 @@ class DotNet {
 
     static using(FullName) {
         DllCall(DotNet.__GetClass_delegate, "AStr", FullName, "Ptr*", IDisPatch:=ComValue(9, 0))
+        return IDisPatch
+    }
+
+    static Type(AssemblyQualifiedName) {
+        DllCall(DotNet.__GetType_delegate, "AStr", AssemblyQualifiedName, "Ptr*", IDisPatch:=ComValue(9, 0))
         return IDisPatch
     }
 }

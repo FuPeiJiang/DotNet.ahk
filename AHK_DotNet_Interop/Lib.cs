@@ -6,6 +6,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Loader;
 using System.IO.Pipes;
 using System.Text;
+using System.Reflection.Emit;
 
 namespace AHK_DotNet_Interop
 {
@@ -34,6 +35,25 @@ namespace AHK_DotNet_Interop
             try
             {
                 Type? found_type = AppDomain.CurrentDomain.GetAssemblies().SelectMany(x => x.GetTypes()).FirstOrDefault(t => t.FullName == FullName);
+                if (found_type == null)
+                {
+                    return 1;
+                }
+                Marshal.WriteIntPtr(out_IDispatch, Marshal.GetComInterfaceForObject(new Wrapper(found_type), typeof(IDispatch)));
+                return 0;
+            }
+            catch (Exception e)
+            {
+                DebugWriteLine(e.ToString());
+                throw;
+            }
+        }
+
+        public static int GetType(string AssemblyQualifiedName, IntPtr out_IDispatch)
+        {
+            try
+            {
+                Type? found_type = Type.GetType(AssemblyQualifiedName);
                 if (found_type == null)
                 {
                     return 1;
@@ -163,7 +183,7 @@ namespace AHK_DotNet_Interop
     [Guid("00020400-0000-0000-C000-000000000046")]
     [ComImport]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    interface IDispatch
+    public interface IDispatch
     {
         [PreserveSig]
         uint GetTypeInfoCount(out uint pctinfo);
@@ -318,7 +338,8 @@ namespace AHK_DotNet_Interop
                 {
                     AppendMethods(type, true);
                     AppendMethods(type.GetType(), false);
-                } else
+                }
+                else
                 {
                     AppendMethods(type, false);
                 }
@@ -384,6 +405,10 @@ namespace AHK_DotNet_Interop
 
         public static object? VariantToObject(nint variant, Type type)
         {
+            if (type.IsEnum)
+            {
+                type = Enum.GetUnderlyingType(type);
+            }
             object? obj = Marshal.GetObjectForNativeVariant(variant);
             switch (obj)
             {
@@ -394,10 +419,98 @@ namespace AHK_DotNet_Interop
                     {
                         return Convert.ToBoolean(maybe_bool);
                     }
-                    return maybe_bool;
+                    return Convert.ChangeType(maybe_bool, type);
+                case Int64 i64:
+                    return Convert.ChangeType(i64, type);
+                case null:
+                    return null;
                 default:
+                    if (obj.GetType().IsCOMObject && type.IsSubclassOf(typeof(MulticastDelegate)))
+                    {
+                        return AssembleDelegate(type, (IDispatch)obj);
+                    }
                     return obj;
             }
+        }
+
+                private static void EmitLdc_I4(ILGenerator il, int val)
+        {
+            switch (val)
+            {
+                case -1: il.Emit(OpCodes.Ldc_I4_M1); break;
+                case 0: il.Emit(OpCodes.Ldc_I4_0); break;
+                case 1: il.Emit(OpCodes.Ldc_I4_1); break;
+                case 2: il.Emit(OpCodes.Ldc_I4_2); break;
+                case 3: il.Emit(OpCodes.Ldc_I4_3); break;
+                case 4: il.Emit(OpCodes.Ldc_I4_4); break;
+                case 5: il.Emit(OpCodes.Ldc_I4_5); break;
+                case 6: il.Emit(OpCodes.Ldc_I4_6); break;
+                case 7: il.Emit(OpCodes.Ldc_I4_7); break;
+                case 8: il.Emit(OpCodes.Ldc_I4_8); break;
+                default: il.Emit(OpCodes.Ldc_I4, val); break; // general opcode for bigger numbers
+            }
+        }
+
+        private static void EmitLdarg(ILGenerator il, int index)
+        {
+            switch (index)
+            {
+                case 0: il.Emit(OpCodes.Ldarg_0); break;
+                case 1: il.Emit(OpCodes.Ldarg_1); break;
+                case 2: il.Emit(OpCodes.Ldarg_2); break;
+                case 3: il.Emit(OpCodes.Ldarg_3); break;
+                default: il.Emit(OpCodes.Ldarg, index); break;
+            }
+        }
+
+        public static Delegate AssembleDelegate(Type delegateType, IDispatch boundObject)
+        {
+            MethodInfo method = delegateType.GetMethod("Invoke")!;
+            Type[] parameterTypes = [typeof(object), .. method.GetParameters().Select(x => x.ParameterType)];
+            DynamicMethod hello = new DynamicMethod("Hello", method.ReturnType, parameterTypes);
+
+            ILGenerator il = hello.GetILGenerator();
+            il.Emit(OpCodes.Ldarg_0);
+            EmitLdc_I4(il, parameterTypes.Length - 1);
+            il.Emit(OpCodes.Newarr, typeof(object));
+            for (int i = 1; i < parameterTypes.Length; ++i)
+            {
+                il.Emit(OpCodes.Dup);
+                EmitLdc_I4(il, i - 1);
+                EmitLdarg(il, i);
+                if (parameterTypes[i].IsValueType)
+                {
+                    il.Emit(OpCodes.Box, parameterTypes[i]);
+                }
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+            il.Emit(OpCodes.Call, delegateWrapperMethodInfo);
+            il.Emit(OpCodes.Ret);
+
+            return hello.CreateDelegate(delegateType, boundObject);
+        }
+
+        private static readonly MethodInfo delegateWrapperMethodInfo = typeof(Wrapper).GetMethod("delegateWrapper")!;
+
+        public static void delegateWrapper(IDispatch boundObject, params object[] args)
+        {
+            IntPtr VarResult = Marshal.AllocCoTaskMem((args.Length + 1) * sizeof_VARIANT);
+            IntPtr rgvarg = VarResult + sizeof_VARIANT;
+            IntPtr j = VarResult + args.Length * sizeof_VARIANT;
+            for (int i = 0; i < args.Length; ++i, j -= sizeof_VARIANT)
+            {
+                WriteToVARIANT(args[i], j);
+            }
+
+            DISPPARAMS pDispParams = new DISPPARAMS
+            {
+                rgvarg = rgvarg,
+                cArgs = args.Length,
+                cNamedArgs = 0,
+                rgdispidNamedArgs = IntPtr.Zero
+            };
+            boundObject.Invoke(0, Guid.Empty, 0, InvokeFlags.DISPATCH_METHOD, pDispParams, VarResult, 0, 0);
+            Marshal.FreeCoTaskMem(VarResult);
         }
 
         public static object?[] DISPPARAMS_to_objectArray(DISPPARAMS pDispParams, ParameterInfo[] parameters)
@@ -456,7 +569,7 @@ namespace AHK_DotNet_Interop
             return true;
         }
 
-        public void WriteToVARIANT(object? obj, nint VarResult)
+        public static void WriteToVARIANT(object? obj, nint VarResult)
         {
             if (NeedsWrapping(obj))
             {
@@ -502,18 +615,23 @@ namespace AHK_DotNet_Interop
                     {
                         return true;
                     }
-                    return type == typeof(Int32);
-                case VarEnum.VT_I8: return type == typeof(Int64);
+                    return type == typeof(Int32) || type == typeof(UInt32) || type == typeof(Int64) || type == typeof(UInt64) || type == typeof(float) || type == typeof(double);
+                case VarEnum.VT_I8: return type == typeof(Int64) || type == typeof(UInt64);
                 case VarEnum.VT_R8: return type == typeof(double);
                 case VarEnum.VT_BSTR: return type == typeof(string);
                 case VarEnum.VT_DISPATCH:
                     nint pdispVal = Marshal.ReadIntPtr(variant + 8);
-                    Type otherType = ((Wrapper)Marshal.GetObjectForIUnknown(pdispVal))._obj.GetType();
+                    object other = Marshal.GetObjectForIUnknown(pdispVal);
+                    Type otherType = other is Wrapper ? ((Wrapper)other)._obj.GetType() : other.GetType();
                     if (type == otherType) // handles value types
                     {
                         return true;
                     }
                     if (type.IsAssignableFrom(otherType))
+                    {
+                        return true;
+                    }
+                    if (type.IsSubclassOf(typeof(MulticastDelegate)))
                     {
                         return true;
                     }
@@ -593,13 +711,24 @@ namespace AHK_DotNet_Interop
                             found_parameters = parameters;
                             return true;
                         });
+                        bool isConstructor = dispIdMember == 0 && _obj is Type;
+                        object? res;
                         if (found_method == null)
                         {
-                            return DISP_E_MEMBERNOTFOUND;
+                            if (isConstructor && ((Type)_obj).IsValueType)
+                            {
+                                res = Activator.CreateInstance((Type)_obj);
+                            }
+                            else
+                            {
+                                return DISP_E_MEMBERNOTFOUND;
+                            }
                         }
-                        var args = DISPPARAMS_to_objectArray(pDispParams, found_parameters!);
-                        bool isConstructor = dispIdMember == 0 && _obj is Type;
-                        object? res = isConstructor ? ((ConstructorInfo)found_method).Invoke(args) : ((MethodInfo)found_method).Invoke(_obj, args);
+                        else
+                        {
+                            var args = DISPPARAMS_to_objectArray(pDispParams, found_parameters!);
+                            res = isConstructor ? ((ConstructorInfo)found_method).Invoke(args) : ((MethodInfo)found_method).Invoke(_obj, args);
+                        }
                         if (VarResult != 0)
                         {
                             WriteToVARIANT(res, VarResult);
@@ -608,6 +737,7 @@ namespace AHK_DotNet_Interop
                     case FieldInfo field:
                         switch (wFlags)
                         {
+                            case InvokeFlags.DISPATCH_METHOD | InvokeFlags.DISPATCH_PROPERTYGET:
                             case InvokeFlags.DISPATCH_PROPERTYGET:
                                 WriteToVARIANT(field.GetValue(_obj), VarResult);
                                 break;
